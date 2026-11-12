@@ -6,9 +6,9 @@ use std::borrow::Cow;
 
 pub struct UnixProcessHighlighter {
     regex: Regex,
-    name: NuStyle,
-    id: NuStyle,
-    bracket: NuStyle,
+    name_style: NuStyle,
+    id_style: NuStyle,
+    bracket_style: NuStyle,
 }
 
 impl UnixProcessHighlighter {
@@ -18,33 +18,36 @@ impl UnixProcessHighlighter {
 
         Ok(Self {
             regex,
-            name: config.name.into(),
-            id: config.id.into(),
-            bracket: config.bracket.into(),
+            name_style: config.name.into(),
+            id_style: config.id.into(),
+            bracket_style: config.bracket.into(),
         })
+    }
+
+    fn format_capture(&self, captures: &regex::Captures) -> String {
+        let process_name = captures
+            .name("process_name")
+            .map(|p| self.name_style.paint(p.as_str()).to_string())
+            .unwrap_or_default();
+        let process_num = captures
+            .name("process_id")
+            .map(|n| self.id_style.paint(n.as_str()).to_string())
+            .unwrap_or_default();
+
+        format!(
+            "{}{}{}{}",
+            process_name,
+            self.bracket_style.paint("["),
+            process_num,
+            self.bracket_style.paint("]")
+        )
     }
 }
 
 impl Highlight for UnixProcessHighlighter {
     fn apply<'a>(&self, input: &'a str) -> Cow<'a, str> {
-        self.regex.replace_all(input, |captures: &regex::Captures| {
-            let process_name = captures
-                .name("process_name")
-                .map(|p| format!("{}", self.name.paint(p.as_str())))
-                .unwrap_or_default();
-            let process_num = captures
-                .name("process_id")
-                .map(|n| format!("{}", self.id.paint(n.as_str())))
-                .unwrap_or_default();
-
-            format!(
-                "{}{}{}{}",
-                process_name,
-                self.bracket.paint("["),
-                process_num,
-                self.bracket.paint("]")
-            )
-        })
+        self.regex
+            .replace_all(input, |captures: &regex::Captures| self.format_capture(captures))
     }
 }
 

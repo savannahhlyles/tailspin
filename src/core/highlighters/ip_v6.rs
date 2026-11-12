@@ -7,9 +7,9 @@ use std::net::Ipv6Addr;
 
 pub struct IpV6Highlighter {
     regex: Regex,
-    number: NuStyle,
-    letter: NuStyle,
-    separator: NuStyle,
+    digit_style: NuStyle,
+    hex_style: NuStyle,
+    separator_style: NuStyle,
 }
 
 impl IpV6Highlighter {
@@ -19,10 +19,30 @@ impl IpV6Highlighter {
 
         Ok(Self {
             regex,
-            number: config.number.into(),
-            letter: config.letter.into(),
-            separator: config.separator.into(),
+            digit_style: config.number.into(),
+            hex_style: config.letter.into(),
+            separator_style: config.separator.into(),
         })
+    }
+
+    fn colorize_char(&self, ch: char) -> String {
+        match ch {
+            '0'..='9' => self.digit_style.paint(ch.to_string()).to_string(),
+            'a'..='f' | 'A'..='F' => self.hex_style.paint(ch.to_string()).to_string(),
+            ':' | '.' => self.separator_style.paint(ch.to_string()).to_string(),
+            _ => ch.to_string(),
+        }
+    }
+
+    fn format_address(&self, caps: &Captures<'_>) -> String {
+        let mut result: String = caps[1].chars().map(|c| self.colorize_char(c)).collect();
+
+        if let (Some(slash), Some(netmask)) = (caps.get(2), caps.get(3)) {
+            result.push_str(&self.separator_style.paint(slash.as_str()).to_string());
+            result.push_str(&self.digit_style.paint(netmask.as_str()).to_string());
+        }
+
+        result
     }
 }
 
@@ -34,24 +54,7 @@ impl Highlight for IpV6Highlighter {
 
         self.regex
             .replace_all(input, |caps: &Captures<'_>| match caps[1].parse::<Ipv6Addr>() {
-                Ok(_ip) => {
-                    let mut output = caps[1]
-                        .chars()
-                        .map(|c| match c {
-                            '0'..='9' => self.number.paint(c.to_string()).to_string(),
-                            'a'..='f' | 'A'..='F' => self.letter.paint(c.to_string()).to_string(),
-                            ':' | '.' => self.separator.paint(c.to_string()).to_string(),
-                            _ => c.to_string(),
-                        })
-                        .collect::<String>();
-
-                    if let (Some(slash), Some(netmask)) = (caps.get(2), caps.get(3)) {
-                        output.push_str(&self.separator.paint(slash.as_str()).to_string());
-                        output.push_str(&self.number.paint(netmask.as_str()).to_string());
-                    }
-
-                    output
-                }
+                Ok(_) => self.format_address(caps),
                 Err(_) => caps.get(0).map(|m| m.as_str()).unwrap_or("").to_string(),
             })
     }

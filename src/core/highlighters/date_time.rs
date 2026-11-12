@@ -7,23 +7,17 @@ use std::fmt::Write as _;
 
 pub struct TimeHighlighter {
     regex: Regex,
-    idx: Idx,
-    time: NuStyle,
-    zone: NuStyle,
-    separator: NuStyle,
+    parts: Vec<(usize, PartKind)>,
+    time_style: NuStyle,
+    zone_style: NuStyle,
+    sep_style: NuStyle,
 }
 
 #[derive(Copy, Clone)]
-struct Idx {
-    t: usize,
-    hours: usize,
-    colon1: usize,
-    minutes: usize,
-    colon2: usize,
-    seconds: usize,
-    frac_sep: usize,
-    frac_digits: usize,
-    tz: usize,
+enum PartKind {
+    Time,
+    Zone,
+    Separator,
 }
 
 impl TimeHighlighter {
@@ -39,70 +33,70 @@ impl TimeHighlighter {
 
         let regex = RegexBuilder::new(pattern).unicode(false).build()?;
 
-        let mut name_to_idx = std::collections::HashMap::new();
+        let mut name_map = std::collections::HashMap::new();
         for (i, name_opt) in regex.capture_names().enumerate() {
             if let Some(name) = name_opt {
-                name_to_idx.insert(name.to_string(), i);
+                name_map.insert(name.to_string(), i);
             }
         }
-        let idx = Idx {
-            t: name_to_idx["T"],
-            hours: name_to_idx["hours"],
-            colon1: name_to_idx["colon1"],
-            minutes: name_to_idx["minutes"],
-            colon2: name_to_idx["colon2"],
-            seconds: name_to_idx["seconds"],
-            frac_sep: name_to_idx["frac_sep"],
-            frac_digits: name_to_idx["frac_digits"],
-            tz: name_to_idx["tz"],
-        };
+
+        let parts = vec![
+            (name_map["T"], PartKind::Zone),
+            (name_map["hours"], PartKind::Time),
+            (name_map["colon1"], PartKind::Separator),
+            (name_map["minutes"], PartKind::Time),
+            (name_map["colon2"], PartKind::Separator),
+            (name_map["seconds"], PartKind::Time),
+            (name_map["frac_sep"], PartKind::Separator),
+            (name_map["frac_digits"], PartKind::Time),
+            (name_map["tz"], PartKind::Zone),
+        ];
 
         Ok(Self {
             regex,
-            idx,
-            time: time_config.time.into(),
-            zone: time_config.zone.into(),
-            separator: time_config.separator.into(),
+            parts,
+            time_style: time_config.time.into(),
+            zone_style: time_config.zone.into(),
+            sep_style: time_config.separator.into(),
         })
     }
 
-    #[inline]
-    fn write_part(buf: &mut String, caps: &Captures<'_>, i: usize, style: &NuStyle) {
-        if let Some(m) = caps.get(i) {
-            let _ = write!(buf, "{}", style.paint(m.as_str()));
+    fn style_for(&self, kind: PartKind) -> &NuStyle {
+        match kind {
+            PartKind::Time => &self.time_style,
+            PartKind::Zone => &self.zone_style,
+            PartKind::Separator => &self.sep_style,
+        }
+    }
+
+    fn write_parts(&self, caps: &Captures<'_>, buf: &mut String) {
+        for &(idx, kind) in &self.parts {
+            if let Some(m) = caps.get(idx) {
+                let _ = write!(buf, "{}", self.style_for(kind).paint(m.as_str()));
+            }
         }
     }
 }
 
 impl Highlight for TimeHighlighter {
     fn apply<'a>(&self, input: &'a str) -> Cow<'a, str> {
-        let mut it = self.regex.captures_iter(input).peekable();
-        if it.peek().is_none() {
+        let mut iter = self.regex.captures_iter(input).peekable();
+        if iter.peek().is_none() {
             return Cow::Borrowed(input);
         }
 
-        let mut out = String::with_capacity(input.len() + 32);
-        let mut last = 0usize;
+        let mut result = String::with_capacity(input.len() + 32);
+        let mut tail = 0usize;
 
         for caps in self.regex.captures_iter(input) {
             let m = caps.get(0).unwrap();
-            out.push_str(&input[last..m.start()]);
-
-            Self::write_part(&mut out, &caps, self.idx.t, &self.zone);
-            Self::write_part(&mut out, &caps, self.idx.hours, &self.time);
-            Self::write_part(&mut out, &caps, self.idx.colon1, &self.separator);
-            Self::write_part(&mut out, &caps, self.idx.minutes, &self.time);
-            Self::write_part(&mut out, &caps, self.idx.colon2, &self.separator);
-            Self::write_part(&mut out, &caps, self.idx.seconds, &self.time);
-            Self::write_part(&mut out, &caps, self.idx.frac_sep, &self.separator);
-            Self::write_part(&mut out, &caps, self.idx.frac_digits, &self.time);
-            Self::write_part(&mut out, &caps, self.idx.tz, &self.zone);
-
-            last = m.end();
+            result.push_str(&input[tail..m.start()]);
+            self.write_parts(&caps, &mut result);
+            tail = m.end();
         }
 
-        out.push_str(&input[last..]);
-        Cow::Owned(out)
+        result.push_str(&input[tail..]);
+        Cow::Owned(result)
     }
 }
 

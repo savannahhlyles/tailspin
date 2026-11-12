@@ -7,7 +7,7 @@ use std::borrow::Cow;
 
 pub struct KeywordHighlighter {
     ac: AhoCorasick,
-    style: NuStyle,
+    match_style: NuStyle,
 }
 
 impl KeywordHighlighter {
@@ -19,51 +19,53 @@ impl KeywordHighlighter {
 
         Ok(Self {
             ac,
-            style: keyword_config.style.into(),
+            match_style: keyword_config.style.into(),
         })
+    }
+
+    fn paint_keyword(&self, text: &str) -> String {
+        if self.match_style.background.is_none() {
+            format!("{}", self.match_style.paint(text))
+        } else {
+            let padded = format!(" {} ", text);
+            format!("{}", self.match_style.paint(padded))
+        }
     }
 }
 
-fn is_word_byte(b: u8) -> bool {
-    b.is_ascii_uppercase() || b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_'
+fn is_word_char(byte: u8) -> bool {
+    byte.is_ascii_uppercase() || byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_'
 }
 
-fn is_word_boundary(hay: &[u8], start: usize, end: usize) -> bool {
-    let left_ok = start == 0 || !is_word_byte(hay[start - 1]);
-    let right_ok = end == hay.len() || !is_word_byte(hay[end]);
+fn at_word_boundary(hay: &[u8], start: usize, end: usize) -> bool {
+    let left_ok = start == 0 || !is_word_char(hay[start - 1]);
+    let right_ok = end == hay.len() || !is_word_char(hay[end]);
     left_ok && right_ok
 }
 
 impl Highlight for KeywordHighlighter {
     fn apply<'a>(&self, input: &'a str) -> Cow<'a, str> {
         let bytes = input.as_bytes();
-        let mut out: Option<String> = None;
-        let mut last = 0;
+        let mut result: Option<String> = None;
+        let mut tail = 0;
 
         for m in self.ac.find_iter(bytes) {
-            let (s, e) = (m.start(), m.end());
-            if !is_word_boundary(bytes, s, e) {
+            let (start, end) = (m.start(), m.end());
+            if !at_word_boundary(bytes, start, end) {
                 continue;
             }
 
-            let out_buf = out.get_or_insert_with(|| String::with_capacity(input.len() + 16));
+            let buf = result.get_or_insert_with(|| String::with_capacity(input.len() + 16));
+            buf.push_str(&input[tail..start]);
+            buf.push_str(&self.paint_keyword(&input[start..end]));
 
-            out_buf.push_str(&input[last..s]);
-
-            if self.style.background.is_none() {
-                out_buf.push_str(&format!("{}", self.style.paint(&input[s..e])));
-            } else {
-                let padded = format!(" {} ", &input[s..e]);
-                out_buf.push_str(&format!("{}", self.style.paint(padded)));
-            }
-
-            last = e;
+            tail = end;
         }
 
-        match out {
+        match result {
             None => Cow::Borrowed(input),
             Some(mut s) => {
-                s.push_str(&input[last..]);
+                s.push_str(&input[tail..]);
                 Cow::Owned(s)
             }
         }

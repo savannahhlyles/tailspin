@@ -3,99 +3,83 @@ use std::borrow::Cow;
 
 use crate::core::config::QuotesConfig;
 use crate::core::highlighter::Highlight;
-use crate::core::highlighters::quote::State::{InsideQuote, OutsideQuote};
 use crate::style::Style;
 
-const RESET: &str = "\x1b[0m";
+const RESET_SEQ: &str = "\x1b[0m";
 
 pub struct QuoteHighlighter {
-    quotes_token: char,
-    color: String,
+    token: char,
+    style_code: String,
 }
 
 impl QuoteHighlighter {
     pub fn new(config: QuotesConfig) -> Self {
-        let color = ansi_color_code_without_reset(config.style);
+        let style_code = extract_color_prefix(config.style);
 
         Self {
-            quotes_token: config.quotes_token,
-            color,
+            token: config.quotes_token,
+            style_code,
+        }
+    }
+
+    fn has_valid_quotes(&self, input: &str) -> bool {
+        let count = input.chars().filter(|&ch| ch == self.token).count();
+        count > 0 && count % 2 == 0
+    }
+
+    fn process_quoted_char(ch: char, style_code: &str, reset_buffer: &mut String, output: &mut String) {
+        reset_buffer.push(ch);
+        if reset_buffer.as_str() == RESET_SEQ {
+            output.push_str(reset_buffer);
+            output.push_str(style_code);
+            reset_buffer.clear();
+        } else if !RESET_SEQ.starts_with(reset_buffer.as_str()) {
+            output.push_str(reset_buffer);
+            reset_buffer.clear();
         }
     }
 }
 
-fn ansi_color_code_without_reset(style: Style) -> String {
+fn extract_color_prefix(style: Style) -> String {
     let nu_style = NuStyle::from(style);
-    let styled_str = format!("{}", nu_style.paint(""));
-
-    styled_str.replace(RESET, "")
+    let styled = format!("{}", nu_style.paint(""));
+    styled.replace(RESET_SEQ, "")
 }
 
 impl Highlight for QuoteHighlighter {
     fn apply<'a>(&self, input: &'a str) -> Cow<'a, str> {
-        let quotes_count = input
-            .chars()
-            .fold(0, |acc, ch| acc + (ch == self.quotes_token) as usize);
-
-        if quotes_count == 0 || quotes_count % 2 != 0 {
+        if !self.has_valid_quotes(input) {
             return Cow::Borrowed(input);
         }
 
-        let mut state = OutsideQuote;
+        let mut inside = false;
         let mut output = String::new();
+        let mut reset_buffer = String::new();
 
         for ch in input.chars() {
-            match &mut state {
-                InsideQuote {
-                    color_inside_quote: color,
-                    potential_reset_code,
-                } => {
-                    if ch == self.quotes_token {
-                        // End of a quoted segment: insert the closing quote and reset.
-                        output.push(ch);
-                        output.push_str(RESET);
-                        state = OutsideQuote;
-                        continue;
-                    }
-
-                    // Accumulate characters to see if we are matching a reset sequence.
-                    potential_reset_code.push(ch);
-                    if potential_reset_code.as_str() == RESET {
-                        output.push_str(potential_reset_code);
-                        output.push_str(color);
-                        potential_reset_code.clear();
-                    } else if !RESET.starts_with(potential_reset_code.as_str()) {
-                        // The accumulated characters do not form the reset code.
-                        output.push_str(potential_reset_code);
-                        potential_reset_code.clear();
-                    }
-                }
-                OutsideQuote => {
-                    if ch == self.quotes_token {
-                        // Start of a quoted segment: insert the color code and the quote.
-                        output.push_str(&self.color);
-                        output.push(ch);
-                        state = InsideQuote {
-                            color_inside_quote: self.color.clone(),
-                            potential_reset_code: String::new(),
-                        };
-                        continue;
-                    }
+            if inside {
+                if ch == self.token {
                     output.push(ch);
+                    output.push_str(RESET_SEQ);
+                    inside = false;
+                    continue;
                 }
+
+                Self::process_quoted_char(ch, &self.style_code, &mut reset_buffer, &mut output);
+            } else {
+                if ch == self.token {
+                    output.push_str(&self.style_code);
+                    output.push(ch);
+                    inside = true;
+                    reset_buffer.clear();
+                    continue;
+                }
+                output.push(ch);
             }
         }
 
         Cow::Owned(output)
     }
-}
-
-enum State {
-    InsideQuote {
-        color_inside_quote: String,
-        potential_reset_code: String,
-    },
-    OutsideQuote,
 }
 
 #[cfg(test)]

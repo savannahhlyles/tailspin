@@ -6,9 +6,9 @@ use std::borrow::Cow;
 
 pub struct UuidHighlighter {
     regex: Regex,
-    number: NuStyle,
-    letter: NuStyle,
-    dash: NuStyle,
+    digit_style: NuStyle,
+    hex_style: NuStyle,
+    separator_style: NuStyle,
 }
 
 impl UuidHighlighter {
@@ -29,25 +29,26 @@ impl UuidHighlighter {
 
         Ok(Self {
             regex,
-            number: config.number.into(),
-            letter: config.letter.into(),
-            dash: config.dash.into(),
+            digit_style: config.number.into(),
+            hex_style: config.letter.into(),
+            separator_style: config.dash.into(),
         })
+    }
+
+    fn colorize_char(&self, ch: char) -> String {
+        match ch {
+            '0'..='9' => self.digit_style.paint(ch.to_string()).to_string(),
+            'a'..='f' | 'A'..='F' => self.hex_style.paint(ch.to_string()).to_string(),
+            '-' => self.separator_style.paint(ch.to_string()).to_string(),
+            _ => ch.to_string(),
+        }
     }
 }
 
 impl Highlight for UuidHighlighter {
     fn apply<'a>(&self, input: &'a str) -> Cow<'a, str> {
         self.regex.replace_all(input, |caps: &Captures<'_>| {
-            caps[0]
-                .chars()
-                .map(|c| match c {
-                    '0'..='9' => format!("{}", self.number.paint(c.to_string())),
-                    'a'..='f' | 'A'..='F' => format!("{}", self.letter.paint(c.to_string())),
-                    '-' => format!("{}", self.dash.paint(c.to_string())),
-                    _ => c.to_string(),
-                })
-                .collect::<String>()
+            caps[0].chars().map(|c| self.colorize_char(c)).collect::<String>()
         })
     }
 }

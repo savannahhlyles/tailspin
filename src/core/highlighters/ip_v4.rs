@@ -4,10 +4,12 @@ use nu_ansi_term::Style as NuStyle;
 use regex::{Captures, Error, Regex, RegexBuilder};
 use std::borrow::Cow;
 
+const OCTET_NAMES: [&str; 4] = ["o1", "o2", "o3", "o4"];
+
 pub struct IpV4Highlighter {
     regex: Regex,
-    segment_style: NuStyle,
-    separator_style: NuStyle,
+    octet_style: NuStyle,
+    dot_style: NuStyle,
 }
 
 impl IpV4Highlighter {
@@ -23,9 +25,45 @@ impl IpV4Highlighter {
 
         Ok(Self {
             regex,
-            segment_style: config.number.into(),
-            separator_style: config.separator.into(),
+            octet_style: config.number.into(),
+            dot_style: config.separator.into(),
         })
+    }
+
+    fn validate_octets(caps: &Captures<'_>) -> bool {
+        OCTET_NAMES.iter().all(|name| {
+            caps.name(name)
+                .expect("named octet group always present")
+                .as_str()
+                .parse::<u8>()
+                .is_ok()
+        })
+    }
+
+    fn validate_mask(caps: &Captures<'_>) -> bool {
+        match caps.name("mask").map(|m| m.as_str()) {
+            Some(mask_text) => mask_text.parse::<u8>().map(|v| v <= 32).unwrap_or(false),
+            None => true,
+        }
+    }
+
+    fn format_address(&self, caps: &Captures<'_>) -> String {
+        let mut result = String::new();
+
+        for (idx, &name) in OCTET_NAMES.iter().enumerate() {
+            let text = caps.name(name).expect("named octet group always present").as_str();
+            result.push_str(&self.octet_style.paint(text).to_string());
+            if idx < 3 {
+                result.push_str(&self.dot_style.paint(".").to_string());
+            }
+        }
+
+        if let Some(mask_match) = caps.name("mask") {
+            result.push_str(&self.dot_style.paint("/").to_string());
+            result.push_str(&self.octet_style.paint(mask_match.as_str()).to_string());
+        }
+
+        result
     }
 }
 
@@ -35,47 +73,16 @@ impl Highlight for IpV4Highlighter {
             return Cow::Borrowed(input);
         }
 
-        let seg = &self.segment_style;
-        let sep = &self.separator_style;
+        self.regex.replace_all(input, |caps: &Captures<'_>| {
+            let raw = caps.get(0).expect("full match always present").as_str();
 
-        self.regex
-            .replace_all(input, |caps: &Captures<'_>| highlight_caps(seg, sep, caps))
+            if !Self::validate_octets(caps) || !Self::validate_mask(caps) {
+                return raw.to_string();
+            }
+
+            self.format_address(caps)
+        })
     }
-}
-
-fn highlight_caps(seg_style: &NuStyle, sep_style: &NuStyle, caps: &Captures<'_>) -> String {
-    let full_match = caps.get(0).expect("full match always present").as_str();
-
-    let names = ["o1", "o2", "o3", "o4"];
-    for &n in &names {
-        let txt = caps.name(n).expect("named octet group always present").as_str();
-        if txt.parse::<u8>().is_err() {
-            return full_match.to_string();
-        }
-    }
-
-    let mask_str = caps.name("mask").map(|m| m.as_str());
-    if let Some(ms) = mask_str {
-        if !ms.parse::<u8>().map(|v| v <= 32).unwrap_or(false) {
-            return full_match.to_string();
-        }
-    }
-
-    let mut output = String::new();
-    for (i, &n) in names.iter().enumerate() {
-        let text = caps.name(n).expect("named octet group always present").as_str();
-        output.push_str(&seg_style.paint(text).to_string());
-        if i < 3 {
-            output.push_str(&sep_style.paint(".").to_string());
-        }
-    }
-
-    if let Some(ms) = mask_str {
-        output.push_str(&sep_style.paint("/").to_string());
-        output.push_str(&seg_style.paint(ms).to_string());
-    }
-
-    output
 }
 
 #[cfg(test)]
@@ -122,13 +129,9 @@ mod tests {
         .unwrap();
 
         let cases = vec![
-            // octet >255
             ("256.1.1.1", "256.1.1.1"),
-            // octet >255
             ("999.999.999.999", "999.999.999.999"),
-            // mask >32
             ("192.168.0.1/33", "192.168.0.1/33"),
-            // partial (too few segments) shouldn’t match at all
             ("1.2.3", "1.2.3"),
         ];
 
