@@ -19,13 +19,13 @@ impl PointerHighlighter {
             \b
             (?P<prefix>0x)
             (?P<first_half>[0-9a-fA-F]{8})
-            \b          
+            \b
             |
             \b
             (?P<prefix64>0x)
             (?P<first_half64>[0-9a-fA-F]{8})
             (?P<second_half>[0-9a-fA-F]{8})
-            \b  
+            \b
         ";
 
         let regex = RegexBuilder::new(pattern).unicode(false).build()?;
@@ -39,6 +39,19 @@ impl PointerHighlighter {
             x: config.x.into(),
         })
     }
+
+    fn colorize_hex_char(&self, c: char) -> String {
+        match c {
+            '0'..='9' => format!("{}", self.number.paint(c.to_string())),
+            'x' | 'X' => format!("{}", self.x.paint(c.to_string())),
+            'a'..='f' | 'A'..='F' => format!("{}", self.letter.paint(c.to_string())),
+            _ => c.to_string(),
+        }
+    }
+
+    fn format_hex_string(&self, text: &str) -> String {
+        text.chars().map(|c| self.colorize_hex_char(c)).collect()
+    }
 }
 
 impl Highlight for PointerHighlighter {
@@ -50,23 +63,13 @@ impl Highlight for PointerHighlighter {
                 .or_else(|| caps.name("first_half64"))
                 .unwrap()
                 .as_str();
-            let formatted_prefix = prefix
-                .chars()
-                .map(|c| highlight_char(c, self.number, self.x, self.letter))
-                .collect::<String>();
-            let formatted_first_half = first_half
-                .chars()
-                .map(|c| highlight_char(c, self.number, self.x, self.letter))
-                .collect::<String>();
+            let formatted_prefix = self.format_hex_string(prefix);
+            let formatted_first_half = self.format_hex_string(first_half);
 
             caps.name("second_half").map_or_else(
                 || format!("{}{}", formatted_prefix, formatted_first_half),
                 |second_half| {
-                    let formatted_second_half = second_half
-                        .as_str()
-                        .chars()
-                        .map(|c| highlight_char(c, self.number, self.x, self.letter))
-                        .collect::<String>();
+                    let formatted_second_half = self.format_hex_string(second_half.as_str());
                     format!(
                         "{}{}{}{}",
                         formatted_prefix,
@@ -77,15 +80,6 @@ impl Highlight for PointerHighlighter {
                 },
             )
         })
-    }
-}
-
-fn highlight_char(c: char, number: NuStyle, x: NuStyle, letter: NuStyle) -> String {
-    match c {
-        '0'..='9' => format!("{}", number.paint(c.to_string())),
-        'x' | 'X' => format!("{}", x.paint(c.to_string())),
-        'a'..='f' | 'A'..='F' => format!("{}", letter.paint(c.to_string())),
-        _ => c.to_string(),
     }
 }
 

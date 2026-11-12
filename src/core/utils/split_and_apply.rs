@@ -4,7 +4,7 @@ use memchr::memmem::Finder;
 use std::borrow::Cow;
 use std::cmp::min;
 
-const THREE_KB: usize = 3 * 1024;
+const ALLOC_CAP: usize = 3 * 1024;
 
 #[derive(Default)]
 pub struct FoldState<'a> {
@@ -53,7 +53,7 @@ pub fn apply_only_to_unhighlighted<'a>(input: &'a str, highlighter: &StaticHighl
 
 fn allocate_string(input: &str) -> String {
     let input_length_times_3 = input.len().saturating_mul(3);
-    let allocation_size = min(input_length_times_3, THREE_KB);
+    let allocation_size = min(input_length_times_3, ALLOC_CAP);
 
     String::with_capacity(allocation_size)
 }

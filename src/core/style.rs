@@ -62,6 +62,10 @@ impl Style {
     pub const fn on(&self, bg: Color) -> Style {
         Style { bg: Some(bg), ..*self }
     }
+
+    pub const fn has_decoration(&self) -> bool {
+        self.bold || self.faint || self.italic || self.underline
+    }
 }
 
 /// Available ANSI colors for terminal output.

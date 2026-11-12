@@ -6,8 +6,8 @@ use std::borrow::Cow;
 
 pub struct KeyValueHighlighter {
     regex: Regex,
-    key: NuStyle,
-    separator: NuStyle,
+    key_style: NuStyle,
+    separator_style: NuStyle,
 }
 
 impl KeyValueHighlighter {
@@ -17,9 +17,18 @@ impl KeyValueHighlighter {
 
         Ok(Self {
             regex,
-            key: config.key.into(),
-            separator: config.separator.into(),
+            key_style: config.key.into(),
+            separator_style: config.separator.into(),
         })
+    }
+
+    fn format_kv_match(&self, space_or_start: &str, key: &str, equals: &str) -> String {
+        format!(
+            "{}{}{}",
+            space_or_start,
+            self.key_style.paint(key),
+            self.separator_style.paint(equals)
+        )
     }
 }
 
@@ -27,16 +36,10 @@ impl Highlight for KeyValueHighlighter {
     fn apply<'a>(&self, input: &'a str) -> Cow<'a, str> {
         self.regex.replace_all(input, |captures: &Captures| {
             let space_or_start = captures.name("space_or_start").map(|s| s.as_str()).unwrap_or_default();
-            let key = captures
-                .name("key")
-                .map(|k| format!("{}", self.key.paint(k.as_str())))
-                .unwrap_or_default();
-            let equals_sign = captures
-                .name("equals")
-                .map(|e| format!("{}", self.separator.paint(e.as_str())))
-                .unwrap_or_default();
+            let key = captures.name("key").map(|k| k.as_str()).unwrap_or_default();
+            let equals = captures.name("equals").map(|e| e.as_str()).unwrap_or_default();
 
-            format!("{}{}{}", space_or_start, key, equals_sign)
+            self.format_kv_match(space_or_start, key, equals)
         })
     }
 }

@@ -44,50 +44,58 @@ impl UrlHighlighter {
             symbols: config.symbols.into(),
         })
     }
+
+    fn protocol_style(&self, protocol: &str) -> NuStyle {
+        match protocol {
+            "http" => self.http,
+            "https" => self.https,
+            _ => NuStyle::default(),
+        }
+    }
+
+    fn format_query_params(&self, query: &str) -> String {
+        self.query_params_regex
+            .replace_all(query, |query_caps: &Captures<'_>| {
+                let delimiter = query_caps.name("delimiter").map_or("", |m| m.as_str());
+                let key = query_caps.name("key").map_or("", |m| m.as_str());
+                let equal = query_caps.name("equal").map_or("", |m| m.as_str());
+                let value = query_caps.name("value").map_or("", |m| m.as_str());
+                format!(
+                    "{}{}{}{}",
+                    self.symbols.paint(delimiter),
+                    self.query_params_key.paint(key),
+                    self.symbols.paint(equal),
+                    self.query_params_value.paint(value)
+                )
+            })
+            .into_owned()
+    }
 }
 
 impl Highlight for UrlHighlighter {
     fn apply<'a>(&self, input: &'a str) -> Cow<'a, str> {
         self.url_regex.replace_all(input, |caps: &Captures<'_>| {
-            let mut output = String::new();
+            let mut result = String::new();
 
             if let Some(protocol) = caps.name("protocol") {
-                let style = match protocol.as_str() {
-                    "http" => self.http,
-                    "https" => self.https,
-                    _ => NuStyle::default(),
-                };
-                output.push_str(&format!("{}://", style.paint(protocol.as_str())));
+                let style = self.protocol_style(protocol.as_str());
+                result.push_str(&format!("{}://", style.paint(protocol.as_str())));
             }
 
             if let Some(host) = caps.name("host") {
-                output.push_str(&format!("{}", self.host.paint(host.as_str())));
+                result.push_str(&format!("{}", self.host.paint(host.as_str())));
             }
 
             if let Some(path) = caps.name("path") {
-                output.push_str(&format!("{}", self.path.paint(path.as_str())));
+                result.push_str(&format!("{}", self.path.paint(path.as_str())));
             }
 
             if let Some(query) = caps.name("query") {
-                let query_highlighted =
-                    self.query_params_regex
-                        .replace_all(query.as_str(), |query_caps: &Captures<'_>| {
-                            let delimiter = query_caps.name("delimiter").map_or("", |m| m.as_str());
-                            let key = query_caps.name("key").map_or("", |m| m.as_str());
-                            let equal = query_caps.name("equal").map_or("", |m| m.as_str());
-                            let value = query_caps.name("value").map_or("", |m| m.as_str());
-                            format!(
-                                "{}{}{}{}",
-                                self.symbols.paint(delimiter),
-                                self.query_params_key.paint(key),
-                                self.symbols.paint(equal),
-                                self.query_params_value.paint(value)
-                            )
-                        });
-                output.push_str(&format!("{}", query_highlighted));
+                let highlighted_query = self.format_query_params(query.as_str());
+                result.push_str(&highlighted_query);
             }
 
-            output
+            result
         })
     }
 }

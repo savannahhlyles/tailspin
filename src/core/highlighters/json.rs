@@ -26,47 +26,47 @@ impl JsonHighlighter {
         }
     }
 
-    fn format_json(&self, value: &Value, output: &mut String) {
+    fn format_value(&self, value: &Value, buf: &mut String) {
         match value {
             Value::Object(map) => {
-                write!(output, "{}", self.curly_bracket.paint("{")).unwrap();
+                write!(buf, "{}", self.curly_bracket.paint("{")).unwrap();
                 let mut first = true;
                 for (key, val) in map {
                     if !first {
-                        write!(output, "{}", self.comma.paint(",")).unwrap();
+                        write!(buf, "{}", self.comma.paint(",")).unwrap();
                     }
                     first = false;
 
                     write!(
-                        output,
+                        buf,
                         " {}{}{}",
                         self.quote_token.paint("\""),
                         self.key.paint(key),
                         self.quote_token.paint("\"")
                     )
                     .unwrap();
-                    write!(output, "{} ", self.colon.paint(":")).unwrap();
+                    write!(buf, "{} ", self.colon.paint(":")).unwrap();
 
-                    self.format_json(val, output);
+                    self.format_value(val, buf);
                 }
-                write!(output, " {}", self.curly_bracket.paint("}")).unwrap();
+                write!(buf, " {}", self.curly_bracket.paint("}")).unwrap();
             }
-            Value::Array(array) => {
-                write!(output, "{}", self.square_bracket.paint("[")).unwrap();
+            Value::Array(arr) => {
+                write!(buf, "{}", self.square_bracket.paint("[")).unwrap();
                 let mut first = true;
-                for item in array {
+                for item in arr {
                     if !first {
-                        write!(output, "{} ", self.comma.paint(",")).unwrap();
+                        write!(buf, "{} ", self.comma.paint(",")).unwrap();
                     }
                     first = false;
 
-                    self.format_json(item, output);
+                    self.format_value(item, buf);
                 }
-                write!(output, "{}", self.square_bracket.paint("]")).unwrap();
+                write!(buf, "{}", self.square_bracket.paint("]")).unwrap();
             }
             Value::String(s) => {
                 write!(
-                    output,
+                    buf,
                     "{}{}{}",
                     self.quote_token.paint("\""),
                     s,
@@ -75,29 +75,117 @@ impl JsonHighlighter {
                 .unwrap();
             }
             Value::Number(n) => {
-                write!(output, "{}", n).unwrap();
+                write!(buf, "{}", n).unwrap();
             }
             Value::Bool(b) => {
-                write!(output, "{}", b).unwrap();
+                write!(buf, "{}", b).unwrap();
             }
             Value::Null => {
-                write!(output, "null").unwrap();
+                write!(buf, "null").unwrap();
             }
         }
     }
 }
 
+fn scan_object_end(input: &[u8], pos: usize) -> Option<usize> {
+    let mut i = pos + 1;
+    while i < input.len() {
+        match input[i] {
+            b'{' => {
+                i = scan_object_end(input, i)?;
+                i += 1;
+            }
+            b'[' => {
+                i = scan_array_end(input, i)?;
+                i += 1;
+            }
+            b'"' => {
+                i = skip_json_string(input, i);
+            }
+            b'}' => return Some(i),
+            _ => {
+                i += 1;
+            }
+        }
+    }
+    None
+}
+
+fn scan_array_end(input: &[u8], pos: usize) -> Option<usize> {
+    let mut i = pos + 1;
+    while i < input.len() {
+        match input[i] {
+            b'{' => {
+                i = scan_object_end(input, i)?;
+                i += 1;
+            }
+            b'[' => {
+                i = scan_array_end(input, i)?;
+                i += 1;
+            }
+            b'"' => {
+                i = skip_json_string(input, i);
+            }
+            b']' => return Some(i),
+            _ => {
+                i += 1;
+            }
+        }
+    }
+    None
+}
+
+fn skip_json_string(input: &[u8], pos: usize) -> usize {
+    let mut i = pos + 1;
+    while i < input.len() {
+        if input[i] == b'\\' {
+            i += 2;
+            continue;
+        }
+        if input[i] == b'"' {
+            return i + 1;
+        }
+        i += 1;
+    }
+    i
+}
+
+fn locate_json_span(input: &str) -> Option<(usize, usize)> {
+    let bytes = input.as_bytes();
+    for (start, &b) in bytes.iter().enumerate() {
+        let end = match b {
+            b'{' => scan_object_end(bytes, start),
+            b'[' => scan_array_end(bytes, start),
+            _ => continue,
+        };
+        if let Some(close) = end {
+            if serde_json::from_str::<Value>(&input[start..=close]).is_ok() {
+                return Some((start, close + 1));
+            }
+        }
+    }
+    None
+}
+
 impl Highlight for JsonHighlighter {
     fn apply<'a>(&self, input: &'a str) -> Cow<'a, str> {
-        let json_value: Value = match serde_json::from_str(input) {
-            Ok(value) => value,
-            Err(_) => return Cow::Borrowed(input),
-        };
+        if let Ok(value) = serde_json::from_str::<Value>(input) {
+            let mut buf = String::new();
+            self.format_value(&value, &mut buf);
+            return Cow::Owned(buf);
+        }
 
-        let mut output = String::new();
-        self.format_json(&json_value, &mut output);
+        if let Some((start, end)) = locate_json_span(input) {
+            if let Ok(value) = serde_json::from_str::<Value>(&input[start..end]) {
+                let mut buf = String::with_capacity(input.len() + 64);
+                buf.push_str(&input[..start]);
+                self.format_value(&value, &mut buf);
+                buf.push_str(&input[end..]);
+                return Cow::Owned(buf);
+            }
+        }
 
-        Cow::Owned(output)
+        Cow::Borrowed(input)
     }
 }
 

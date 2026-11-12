@@ -26,24 +26,28 @@ impl NumberHighlighter {
             style: config.style.into(),
         })
     }
+
+    fn paint_match(&self, text: &str) -> String {
+        format!("{}", self.style.paint(text))
+    }
 }
 
 impl Highlight for NumberHighlighter {
     fn apply<'a>(&self, input: &'a str) -> Cow<'a, str> {
-        let mut it = self.regex.find_iter(input).peekable();
-        if it.peek().is_none() {
+        let mut iter = self.regex.find_iter(input).peekable();
+        if iter.peek().is_none() {
             return Cow::Borrowed(input);
         }
 
         let mut out = String::with_capacity(input.len() + 32);
-        let mut last = 0usize;
+        let mut last_end = 0usize;
 
         for m in self.regex.find_iter(input) {
-            out.push_str(&input[last..m.start()]);
-            let _ = write!(out, "{}", self.style.paint(&input[m.start()..m.end()]));
-            last = m.end();
+            out.push_str(&input[last_end..m.start()]);
+            let _ = write!(out, "{}", self.paint_match(&input[m.start()..m.end()]));
+            last_end = m.end();
         }
-        out.push_str(&input[last..]);
+        out.push_str(&input[last_end..]);
 
         Cow::Owned(out)
     }

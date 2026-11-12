@@ -28,11 +28,11 @@ impl UnixPathHighlighter {
         })
     }
 
-    fn paint_segment(&self, s: &str) -> String {
-        self.segment.paint(s).to_string()
+    fn format_segment(&self, text: &str) -> String {
+        self.segment.paint(text).to_string()
     }
 
-    fn paint_separator(&self) -> String {
+    fn format_separator(&self) -> String {
         self.separator.paint("/").to_string()
     }
 }
@@ -51,17 +51,17 @@ impl Highlight for UnixPathHighlighter {
             for ch in path.chars() {
                 if ch == '/' {
                     if !cur.is_empty() {
-                        out.push_str(&self.paint_segment(&cur));
+                        out.push_str(&self.format_segment(&cur));
                         cur.clear();
                     }
-                    out.push_str(&self.paint_separator());
+                    out.push_str(&self.format_separator());
                 } else {
                     cur.push(ch);
                 }
             }
 
             if !cur.is_empty() {
-                out.push_str(&self.paint_segment(&cur));
+                out.push_str(&self.format_segment(&cur));
             }
 
             out
